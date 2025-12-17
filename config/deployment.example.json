@@ -1,0 +1,33 @@
+{
+  "_comment": "Example deployment configuration for AlephAVS contract",
+  "_note": "Copy this file to deployment.json and fill in the actual addresses",
+  "_note2": "EigenLayer contract addresses: https://docs.eigenlayer.xyz/eigenlayer/overview/smart-contracts/overview",
+  "_note3": "Aleph Vault Factory address should be provided by the Aleph protocol team",
+  
+  "1": {
+    "name": "Ethereum Mainnet",
+    "allocationManager": "0x0000000000000000000000000000000000000000",
+    "delegationManager": "0x0000000000000000000000000000000000000000",
+    "strategyManager": "0x0000000000000000000000000000000000000000",
+    "strategy": "0x0000000000000000000000000000000000000000",
+    "vaultFactory": "0x0000000000000000000000000000000000000000",
+    "rewardsCoordinator": "0x0000000000000000000000000000000000000000",
+    "strategyFactory": "0x0000000000000000000000000000000000000000",
+    "allocationDelay": 0,
+    "metadataURI": ""
+  },
+  
+  "11155111": {
+    "name": "Sepolia Testnet",
+    "allocationManager": "0x0000000000000000000000000000000000000000",
+    "delegationManager": "0x0000000000000000000000000000000000000000",
+    "strategyManager": "0x0000000000000000000000000000000000000000",
+    "strategy": "0x0000000000000000000000000000000000000000",
+    "vaultFactory": "0x0000000000000000000000000000000000000000",
+    "rewardsCoordinator": "0x0000000000000000000000000000000000000000",
+    "strategyFactory": "0x0000000000000000000000000000000000000000",
+    "allocationDelay": 0,
+    "metadataURI": ""
+  }
+}
+

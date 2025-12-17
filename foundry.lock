@@ -1,0 +1,11 @@
+{
+  "lib/Aleph": {
+    "rev": "842e4a427373280cc79b14e30da95836d87f6e6b"
+  },
+  "lib/eigenlayer-contracts": {
+    "tag": {
+      "name": "v1.8.1",
+      "rev": "31aade2fc3bf6e2c0160cc2e7c7be1a6017296e5"
+    }
+  }
+}

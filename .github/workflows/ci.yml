@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: ci
+
+jobs:
+  check:
+    name: Foundry project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Configure git for submodule access
+        run: |
+          # AlephFi/smart-contracts is a public repository, no authentication needed
+          # Configure git to not prompt for credentials
+          git config --global core.askPass ""
+          echo "Configured git for public submodule access"
+
+      - name: Initialize submodules
+        run: |
+          # Initialize submodules with authentication (disable interactive prompts)
+          GIT_TERMINAL_PROMPT=0 git submodule sync
+          GIT_TERMINAL_PROMPT=0 git submodule update --init --recursive
+          
+          # Verify Aleph submodule exists
+          if [ ! -d "lib/Aleph/src" ]; then
+            echo "::error::Aleph submodule is required but could not be initialized."
+            echo "The repository https://github.com/AlephFi/smart-contracts should be accessible as it is public."
+            exit 1
+          fi
+
+      - name: Install Foundry
+        # Using nightly version to ensure consistent formatting with local development
+        # To match this locally, run: foundryup
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Show Forge version
+        run: |
+          forge --version
+
+      - name: Run Forge fmt
+        run: |
+          forge fmt --check
+        id: fmt
+
+      - name: Run Forge build
+        run: |
+          forge build --sizes
+        id: build
+
+      - name: Run Forge tests
+        run: |
+          forge test -vvv
+        id: test
+
+      - name: Run Forge coverage
+        run: |
+          forge coverage --ir-minimum --exclude-tests --report summary | grep -v "script/" | grep -v "test/" > coverage_results.txt
+        id: coverage
+
+      - name: Print coverage results
+        run: |
+          echo "=== Coverage Percentages (src/ files only) ==="
+          grep -E "^[|] src/" coverage_results.txt || cat coverage_results.txt
+          echo ""
+          echo "=== Calculated Total (src/ files only) ==="
+          python3 << 'PYTHON'
+          import re
+          import sys
+          
+          covered = 0
+          total = 0
+          files = []
+          
+          with open('coverage_results.txt', 'r') as f:
+              for line in f:
+                  if '| src/' in line:
+                      match = re.search(r'(\d+\.\d+)% \((\d+)/(\d+)\)', line)
+                      if match:
+                          c = int(match.group(2))
+                          t = int(match.group(3))
+                          covered += c
+                          total += t
+                          missing = t - c
+                          if missing > 0:
+                              files.append((line.strip(), c, t, missing))
+          
+          if files:
+              print("Files with missing coverage:")
+              for f, c, t, m in files:
+                  filename_match = re.search(r'src/[^|]+', f)
+                  filename = filename_match.group(0) if filename_match else "unknown"
+                  print(f"  Missing {m} lines: {filename} ({c}/{t} = {(c/t)*100:.2f}%)")
+          
+          if total > 0:
+              coverage = (covered / total) * 100
+              missing = total - covered
+              print(f"\nTotal src/ coverage: {coverage:.2f}% ({covered}/{total} lines)")
+              if missing > 0:
+                  print(f"Missing: {missing} lines to reach 100%")
+              else:
+                  print("✓ 100% coverage achieved!")
+          PYTHON

@@ -1,0 +1,27 @@
+# Compiler files
+cache/
+out/
+
+# Ignores development broadcast logs
+!/broadcast
+/broadcast/*/31337/
+/broadcast/**/dry-run/
+broadcast/
+
+# Docs
+docs/
+
+# node modules
+node_modules/
+
+# Dotenv file
+.env
+
+# Deployment config (contains sensitive info)
+config/deployment.json
+
+# Deployment files (contain sensitive deployment addresses)
+deployments/*.json
+
+# Gas Snapshots
+.gas-snapshot

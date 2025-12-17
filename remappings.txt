@@ -1,0 +1,3 @@
+openzeppelin-contracts/=lib/Aleph/lib/openzeppelin-contracts/
+@openzeppelin/contracts/=lib/eigenlayer-contracts/lib/openzeppelin-contracts-v4.9.0/contracts/
+@openzeppelin-upgrades/contracts/=lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable-v4.9.0/contracts/

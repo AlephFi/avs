@@ -1,0 +1,33 @@
+---
+description: Core coding rules and workflow guidelines for the AlephAVS project
+globs: **/*
+alwaysApply: true
+---
+# Cursor Rules for AlephAVS
+
+## Code Quality Rules
+
+1. **Always format code**: After making any changes to Solidity files, run `forge fmt` to ensure consistent formatting.
+
+2. **Always check bytecode sizes**: After any code changes, run `forge build --sizes` to verify that contract bytecode sizes are within limits. The AlephAVS contract is currently at 24,472 bytes with only 104 bytes remaining before the 24,576 byte limit.
+
+3. **Always run tests**: After making changes, run `forge test` to ensure all tests pass.
+
+4. **Local variable naming**: All local variables must start with an underscore prefix (e.g., `_variableName`).
+
+## Workflow
+
+When making code changes:
+1. Make the changes
+2. Run `forge fmt` to format
+3. Run `forge build --sizes` to check bytecode
+4. Run `forge test` to verify tests pass
+
+## Bytecode Size Warning
+
+⚠️ **CRITICAL**: The AlephAVS contract is at 99.6% of the Ethereum contract size limit (24,472 / 24,576 bytes). Any additions must be carefully considered and may require:
+- Moving functionality to libraries
+- Code optimization
+- Splitting into multiple contracts
+
+Always verify bytecode size after changes to ensure the contract remains deployable.
