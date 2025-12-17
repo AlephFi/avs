@@ -17,8 +17,8 @@ node_modules/
 # Dotenv file
 .env
 
-# Deployment config (contains sensitive info)
-config/deployment.json
+# Deployment config - now tracked in repo with public addresses
+# config/deployment.json
 
 # Deployment files (contain sensitive deployment addresses)
 deployments/*.json
