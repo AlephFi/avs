@@ -16,11 +16,11 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  * @title OnboardOperator
  * @notice Comprehensive script for onboarding an operator to AlephAVS
  * @dev This script performs all necessary steps to onboard an operator:
- *      1. Register as EigenLayer operator (if not already registered)
- *         - Allocation delay is set during registration (from ALLOCATION_DELAY env var, default: 0)
- *      2. Register for AlephAVS operator sets (if not already registered)
- *      3. Allocate stake to vault strategies (if strategies exist in operator sets)
- *      4. Set operator AVS split to 0 (100% to stakers, if not already set)
+ *      1. Ensure allocation delay is set to 0 (required for allocations)
+ *      2. Register as EigenLayer operator (if not already registered)
+ *      3. Register for AlephAVS operator sets (if not already registered)
+ *      4. Allocate stake to vault strategies (if strategies exist in operator sets)
+ *      5. Set operator AVS split to 0 (100% to stakers, if not already set)
  *         - If activation delay is required, the script will STOP here
  *         - You must wait for the activation delay, then re-run the script
  *
@@ -42,7 +42,6 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *      - PRIVATE_KEY (required - operator's private key)
  *      - RPC_URL (or pass via --rpc-url flag)
  *      - ALEPH_AVS_ADDRESS (deployed AlephAVS contract address, or will load from deployments)
- *      - ALLOCATION_DELAY (optional - allocation delay in blocks, default: 0)
  *      - METADATA_URI (optional - operator metadata URI)
  *      - DELEGATION_APPROVER (optional - delegation approver address, default: address(0))
  *
@@ -79,30 +78,42 @@ contract OnboardOperator is Script {
         // Track if we have queued deallocations (needed to stop script after Step 4)
         bool hasQueuedDeallocations = false;
 
-        // Step 1: Register as EigenLayer operator (if not already registered)
+        // Step 1: Ensure allocation delay is set to 0
+        console.log("\n=== Step 1: Checking Allocation Delay ===");
+        (bool isDelaySet, uint32 currentDelay) = allocationManager.getAllocationDelay(operator);
+        console.log("Allocation delay is set:", isDelaySet);
+        console.log("Current allocation delay:", currentDelay, "blocks");
+
+        if (!isDelaySet || currentDelay != 0) {
+            console.log("Setting allocation delay to 0...");
+            allocationManager.setAllocationDelay(operator, 0);
+            console.log("[OK] Allocation delay set to 0 (will take effect after ALLOCATION_CONFIGURATION_DELAY)");
+        } else {
+            console.log("[OK] Allocation delay is already set to 0");
+        }
+
+        // Step 2: Register as EigenLayer operator (if not already registered)
         if (!delegationManager.isOperator(operator)) {
-            console.log("\n=== Step 1: Registering as EigenLayer Operator ===");
-            uint32 allocationDelay = getAllocationDelay();
+            console.log("\n=== Step 2: Registering as EigenLayer Operator ===");
             address delegationApprover = getDelegationApprover();
             string memory metadataURI = getMetadataURI();
 
-            console.log("Allocation delay:", allocationDelay, "blocks");
             console.log("Delegation approver:", delegationApprover);
             console.log("Metadata URI:", metadataURI);
 
-            delegationManager.registerAsOperator(delegationApprover, allocationDelay, metadataURI);
+            delegationManager.registerAsOperator(delegationApprover, 0, metadataURI);
             console.log("[OK] Successfully registered as EigenLayer operator");
         } else {
-            console.log("\n=== Step 1: Already registered as EigenLayer operator [OK] ===");
+            console.log("\n=== Step 2: Already registered as EigenLayer operator [OK] ===");
         }
 
-        // Step 2: Register for AlephAVS operator sets (if not already registered)
+        // Step 3: Register for AlephAVS operator sets (if not already registered)
         OperatorSet memory lstOperatorSet = OperatorSet(alephAVSAddress, AlephUtils.LST_STRATEGIES_OPERATOR_SET_ID);
 
         bool isRegisteredForLST = allocationManager.isOperatorSlashable(operator, lstOperatorSet);
 
         if (!isRegisteredForLST) {
-            console.log("\n=== Step 2: Registering for AlephAVS Operator Sets ===");
+            console.log("\n=== Step 3: Registering for AlephAVS Operator Sets ===");
 
             uint32[] memory operatorSetIds = new uint32[](1);
             operatorSetIds[0] = AlephUtils.LST_STRATEGIES_OPERATOR_SET_ID;
@@ -117,13 +128,13 @@ contract OnboardOperator is Script {
             allocationManager.registerForOperatorSets(operator, registerParams);
             console.log("[OK] Successfully registered for AlephAVS operator sets");
         } else {
-            console.log("\n=== Step 2: Already registered for AlephAVS operator sets [OK] ===");
+            console.log("\n=== Step 3: Already registered for AlephAVS operator sets [OK] ===");
         }
 
-        // Step 3: Allocate stake to vault strategies
+        // Step 4: Allocate stake to vault strategies
         // This step allocates stake to all strategies in the operator sets (LST and Slashed)
         // It doesn't require a specific vault - it allocates to all strategies in the sets
-        console.log("\n=== Step 3: Allocating Stake to Vault Strategies ===");
+        console.log("\n=== Step 4: Allocating Stake to Vault Strategies ===");
 
         // Get current strategies in operator sets from AllocationManager
         // Reuse the operator sets from Step 2
@@ -330,10 +341,10 @@ contract OnboardOperator is Script {
             }
         }
 
-        // Step 4: Set operator AVS split to 0 (100% to stakers)
+        // Step 5: Set operator AVS split to 0 (100% to stakers)
         uint16 currentSplit = rewardsCoordinator.getOperatorAVSSplit(operator, alephAVSAddress);
         if (currentSplit != 0) {
-            console.log("\n=== Step 4: Setting Operator AVS Split to 0 ===");
+            console.log("\n=== Step 5: Setting Operator AVS Split to 0 ===");
             console.log("Current split (bips):", uint256(currentSplit));
             console.log("Setting split to 0 (100% to stakers)...");
 
@@ -360,7 +371,7 @@ contract OnboardOperator is Script {
                 console.log("[OK] Split is immediately active (activation delay is 0)");
             }
         } else {
-            console.log("\n=== Step 4: Operator AVS split already set to 0 [OK] ===");
+            console.log("\n=== Step 5: Operator AVS split already set to 0 [OK] ===");
         }
 
         // If we had queued deallocations, stop here and inform user to wait
@@ -422,24 +433,6 @@ contract OnboardOperator is Script {
                     "ALEPH_AVS_ADDRESS not found. Please set ALEPH_AVS_ADDRESS in .env or deploy the contract first."
                 );
             }
-        }
-    }
-
-    function getAllocationDelay() internal view returns (uint32) {
-        try vm.envUint("ALLOCATION_DELAY") returns (uint256 delay) {
-            if (delay > type(uint32).max) {
-                revert("ALLOCATION_DELAY too large");
-            }
-            // Safe cast: we've already checked delay <= type(uint32).max above
-            // Using assembly to avoid unsafe-typecast warning
-            uint32 result;
-            assembly {
-                result := delay
-            }
-            return result;
-        } catch {
-            console.log("ALLOCATION_DELAY not found, using default: 0");
-            return 0;
         }
     }
 
