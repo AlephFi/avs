@@ -33,9 +33,9 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *
  * @dev NEW OPERATOR ONBOARDING TIMELINE:
  *      For operators who have never set an allocation delay before:
- *      - First run: Sets allocation delay, script stops
+ *      - First run: Sets allocation delay + sets AVS split, script stops
  *      - Wait ~17.5 days (ALLOCATION_CONFIGURATION_DELAY)
- *      - Second run: Completes registration and allocation
+ *      - Second run: Completes Steps 2-4 (operator registration, operator set registration, allocation)
  *
  * @dev Allocation Behavior:
  *      - If operator has available (unallocated) magnitude: allocates directly to AlephAVS
@@ -109,8 +109,8 @@ contract OnboardOperator is Script {
             console.log("Current block:", block.number);
             console.log("Effect block:", effectBlock);
             console.log("Estimated wait time:", estimatedDays, "days");
-            console.log("\n[INFO] Step 4 (allocations) will be skipped - requires waiting for configuration delay.");
-            console.log("After", configDelay, "blocks, re-run this script to complete allocations.");
+            console.log("\n[INFO] Steps 2, 3, 4 will be skipped - requires waiting for configuration delay.");
+            console.log("After", configDelay, "blocks, re-run this script to complete onboarding.");
 
             allocationDelayJustSet = true;
         } else {
@@ -118,7 +118,11 @@ contract OnboardOperator is Script {
         }
 
         // Step 2: Register as EigenLayer operator (if not already registered)
-        if (!delegationManager.isOperator(operator)) {
+        // Note: This requires allocation delay to be configured (not just set)
+        if (allocationDelayJustSet) {
+            console.log("\n=== Step 2: Skipping EigenLayer Operator Registration ===");
+            console.log("[SKIP] Allocation delay must be configured before registering as operator.");
+        } else if (!delegationManager.isOperator(operator)) {
             console.log("\n=== Step 2: Registering as EigenLayer Operator ===");
             address delegationApprover = getDelegationApprover();
             string memory metadataURI = getMetadataURI();
@@ -133,11 +137,15 @@ contract OnboardOperator is Script {
         }
 
         // Step 3: Register for AlephAVS operator sets (if not already registered)
+        // Note: This requires being registered as an EigenLayer operator first
         OperatorSet memory lstOperatorSet = OperatorSet(alephAVSAddress, AlephUtils.LST_STRATEGIES_OPERATOR_SET_ID);
 
         bool isRegisteredForLST = allocationManager.isOperatorSlashable(operator, lstOperatorSet);
 
-        if (!isRegisteredForLST) {
+        if (allocationDelayJustSet) {
+            console.log("\n=== Step 3: Skipping AlephAVS Operator Set Registration ===");
+            console.log("[SKIP] Must complete Step 2 first.");
+        } else if (!isRegisteredForLST) {
             console.log("\n=== Step 3: Registering for AlephAVS Operator Sets ===");
 
             uint32[] memory operatorSetIds = new uint32[](1);
@@ -413,7 +421,7 @@ contract OnboardOperator is Script {
             return;
         }
 
-        // If allocation delay was just set, inform user to wait before allocations can be done
+        // If allocation delay was just set, inform user to wait before other steps can be done
         if (allocationDelayJustSet) {
             uint32 configDelay = allocationManager.ALLOCATION_CONFIGURATION_DELAY();
             uint256 estimatedDays = (configDelay * 12) / 86400;
@@ -422,13 +430,13 @@ contract OnboardOperator is Script {
             console.log("AlephAVS:", alephAVSAddress);
             console.log("\nCompleted steps:");
             console.log("  [OK] Step 1: Allocation delay set to 0");
-            console.log("  [OK] Step 2: EigenLayer operator registration");
-            console.log("  [OK] Step 3: AlephAVS operator set registration");
-            console.log("  [SKIP] Step 4: Stake allocation (requires waiting for configuration delay)");
+            console.log("  [SKIP] Step 2: EigenLayer operator registration (requires configuration delay)");
+            console.log("  [SKIP] Step 3: AlephAVS operator set registration (requires Step 2)");
+            console.log("  [SKIP] Step 4: Stake allocation (requires Step 3)");
             console.log("  [OK] Step 5: Operator AVS split set to 0");
             console.log("\nNext steps:");
             console.log("  1. Wait for ALLOCATION_CONFIGURATION_DELAY (~", estimatedDays, "days /", configDelay, "blocks)");
-            console.log("  2. Re-run this script to complete Step 4 (stake allocation)");
+            console.log("  2. Re-run this script to complete Steps 2, 3, and 4");
             vm.stopBroadcast();
             return;
         }
