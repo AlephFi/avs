@@ -17,6 +17,9 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  * @notice Comprehensive script for onboarding an operator to AlephAVS
  * @dev This script performs all necessary steps to onboard an operator:
  *      1. Ensure allocation delay is set to 0 (required for allocations)
+ *         - IMPORTANT: If allocation delay is not yet initialized, the script will set it
+ *           and STOP. You must wait for ALLOCATION_CONFIGURATION_DELAY (~17.5 days / 126,000 blocks
+ *           on mainnet) before re-running the script to continue.
  *      2. Register as EigenLayer operator (if not already registered)
  *      3. Register for AlephAVS operator sets (if not already registered)
  *      4. Allocate stake to vault strategies (if strategies exist in operator sets)
@@ -27,6 +30,12 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *      The script skips steps that have already been completed.
  *      If the operator AVS split needs activation delay, the script stops
  *      and must be re-run after the delay period.
+ *
+ * @dev NEW OPERATOR ONBOARDING TIMELINE:
+ *      For operators who have never set an allocation delay before:
+ *      - First run: Sets allocation delay, script stops
+ *      - Wait ~17.5 days (ALLOCATION_CONFIGURATION_DELAY)
+ *      - Second run: Completes registration and allocation
  *
  * @dev Allocation Behavior:
  *      - If operator has available (unallocated) magnitude: allocates directly to AlephAVS
@@ -87,7 +96,23 @@ contract OnboardOperator is Script {
         if (!isDelaySet || currentDelay != 0) {
             console.log("Setting allocation delay to 0...");
             allocationManager.setAllocationDelay(operator, 0);
-            console.log("[OK] Allocation delay set to 0 (will take effect after ALLOCATION_CONFIGURATION_DELAY)");
+
+            uint32 configDelay = allocationManager.ALLOCATION_CONFIGURATION_DELAY();
+            uint256 effectBlock = block.number + configDelay;
+            uint256 estimatedDays = (configDelay * 12) / 86400; // ~12 sec per block
+
+            console.log("[OK] Allocation delay set to 0");
+            console.log("\n=== IMPORTANT: Allocation Delay Configuration Delay ===");
+            console.log("ALLOCATION_CONFIGURATION_DELAY:", configDelay, "blocks");
+            console.log("Current block:", block.number);
+            console.log("Effect block:", effectBlock);
+            console.log("Estimated wait time:", estimatedDays, "days");
+            console.log("\n[STOP] You must wait for the configuration delay before proceeding.");
+            console.log("After", configDelay, "blocks, re-run this script to complete onboarding.");
+            console.log("The script will skip Step 1 and continue with registration and allocation.");
+
+            vm.stopBroadcast();
+            return;
         } else {
             console.log("[OK] Allocation delay is already set to 0");
         }
