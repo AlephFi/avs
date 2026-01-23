@@ -62,6 +62,9 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *      - Or deregister from the other AVS first to allow immediate deallocation
  */
 contract OnboardOperator is Script {
+    // ALLOCATION_CONFIGURATION_DELAY is 126,000 blocks on mainnet (~17.5 days at 12s/block)
+    // This is a constant set in AllocationManager but not exposed via IAllocationManager interface
+    uint32 constant ALLOCATION_CONFIGURATION_DELAY = 126_000;
     function run() external {
         // Get operator private key
         uint256 operatorPrivateKey = getOperatorPrivateKey();
@@ -99,7 +102,7 @@ contract OnboardOperator is Script {
             console.log("Setting allocation delay to 0...");
             allocationManager.setAllocationDelay(operator, 0);
 
-            uint32 configDelay = allocationManager.ALLOCATION_CONFIGURATION_DELAY();
+            uint32 configDelay = ALLOCATION_CONFIGURATION_DELAY;
             uint256 effectBlock = block.number + configDelay;
             uint256 estimatedDays = (configDelay * 12) / 86400; // ~12 sec per block
 
@@ -423,7 +426,7 @@ contract OnboardOperator is Script {
 
         // If allocation delay was just set, inform user to wait before other steps can be done
         if (allocationDelayJustSet) {
-            uint32 configDelay = allocationManager.ALLOCATION_CONFIGURATION_DELAY();
+            uint32 configDelay = ALLOCATION_CONFIGURATION_DELAY;
             uint256 estimatedDays = (configDelay * 12) / 86400;
             console.log("\n=== Partial Onboarding Complete ===");
             console.log("Operator:", operator);
@@ -435,7 +438,7 @@ contract OnboardOperator is Script {
             console.log("  [SKIP] Step 4: Stake allocation (requires Step 3)");
             console.log("  [OK] Step 5: Operator AVS split set to 0");
             console.log("\nNext steps:");
-            console.log("  1. Wait for ALLOCATION_CONFIGURATION_DELAY (~", estimatedDays, "days /", configDelay, "blocks)");
+            console.log("  1. Wait for ALLOCATION_CONFIGURATION_DELAY (~%s days / %s blocks)", estimatedDays, configDelay);
             console.log("  2. Re-run this script to complete Steps 2, 3, and 4");
             vm.stopBroadcast();
             return;
