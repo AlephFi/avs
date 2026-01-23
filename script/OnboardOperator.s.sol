@@ -86,6 +86,8 @@ contract OnboardOperator is Script {
 
         // Track if we have queued deallocations (needed to stop script after Step 4)
         bool hasQueuedDeallocations = false;
+        // Track if allocation delay was just set (need to skip Step 4 but continue to Step 5)
+        bool allocationDelayJustSet = false;
 
         // Step 1: Ensure allocation delay is set to 0
         console.log("\n=== Step 1: Checking Allocation Delay ===");
@@ -107,12 +109,10 @@ contract OnboardOperator is Script {
             console.log("Current block:", block.number);
             console.log("Effect block:", effectBlock);
             console.log("Estimated wait time:", estimatedDays, "days");
-            console.log("\n[STOP] You must wait for the configuration delay before proceeding.");
-            console.log("After", configDelay, "blocks, re-run this script to complete onboarding.");
-            console.log("The script will skip Step 1 and continue with registration and allocation.");
+            console.log("\n[INFO] Step 4 (allocations) will be skipped - requires waiting for configuration delay.");
+            console.log("After", configDelay, "blocks, re-run this script to complete allocations.");
 
-            vm.stopBroadcast();
-            return;
+            allocationDelayJustSet = true;
         } else {
             console.log("[OK] Allocation delay is already set to 0");
         }
@@ -167,7 +167,10 @@ contract OnboardOperator is Script {
         IStrategy[] memory lstStrategies = allocationManager.getStrategiesInOperatorSet(lstOperatorSet);
         bool hasPendingAllocations = false;
 
-        if (lstStrategies.length == 0) {
+        if (allocationDelayJustSet) {
+            console.log("[SKIP] Allocation delay was just set. Skipping allocations until configuration delay passes.");
+            console.log("  Re-run this script after the delay to complete Step 4.");
+        } else if (lstStrategies.length == 0) {
             console.log("[WARNING] No strategies found in operator sets. Skipping stake allocation.");
             console.log("  Strategies will be added when vaults are initialized via initializeVault().");
         } else {
@@ -406,6 +409,26 @@ contract OnboardOperator is Script {
             console.log("You must wait for DEALLOCATION_DELAY (", deallocationDelay, "blocks) before continuing.");
             console.log("After the delay, re-run this script to complete allocation to AlephAVS.");
             console.log("The script will skip steps that are already completed.");
+            vm.stopBroadcast();
+            return;
+        }
+
+        // If allocation delay was just set, inform user to wait before allocations can be done
+        if (allocationDelayJustSet) {
+            uint32 configDelay = allocationManager.ALLOCATION_CONFIGURATION_DELAY();
+            uint256 estimatedDays = (configDelay * 12) / 86400;
+            console.log("\n=== Partial Onboarding Complete ===");
+            console.log("Operator:", operator);
+            console.log("AlephAVS:", alephAVSAddress);
+            console.log("\nCompleted steps:");
+            console.log("  [OK] Step 1: Allocation delay set to 0");
+            console.log("  [OK] Step 2: EigenLayer operator registration");
+            console.log("  [OK] Step 3: AlephAVS operator set registration");
+            console.log("  [SKIP] Step 4: Stake allocation (requires waiting for configuration delay)");
+            console.log("  [OK] Step 5: Operator AVS split set to 0");
+            console.log("\nNext steps:");
+            console.log("  1. Wait for ALLOCATION_CONFIGURATION_DELAY (~", estimatedDays, "days /", configDelay, "blocks)");
+            console.log("  2. Re-run this script to complete Step 4 (stake allocation)");
             vm.stopBroadcast();
             return;
         }
