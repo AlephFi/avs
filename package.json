@@ -19,7 +19,10 @@
     "script:auth-signature": "bash -c 'source .env 2>/dev/null; forge script script/GenerateAuthSignature.s.sol:GenerateAuthSignature --rpc-url \"$RPC_URL\" --broadcast'",
     "script:mint-token": "bash -c 'source .env 2>/dev/null; forge script script/MintToken.s.sol:MintToken --rpc-url \"$RPC_URL\" --broadcast'",
     "script:request-unallocate": "bash -c 'source .env 2>/dev/null; forge script script/RequestUnallocate.s.sol:RequestUnallocate --rpc-url \"$RPC_URL\" --broadcast'",
-    "script:complete-unallocate": "bash -c 'source .env 2>/dev/null; forge script script/CompleteUnallocate.s.sol:CompleteUnallocate --rpc-url \"$RPC_URL\" --broadcast'"
+    "script:complete-unallocate": "bash -c 'source .env 2>/dev/null; forge script script/CompleteUnallocate.s.sol:CompleteUnallocate --rpc-url \"$RPC_URL\" --broadcast'",
+    "airdrop:prepare": "python3 scripts/prepare_airdrop_csv.py",
+    "script:airdrop": "bash -c 'source .env 2>/dev/null; DRY_RUN=true forge script script/Airdrop.s.sol:Airdrop --rpc-url \"$RPC_URL\"'",
+    "script:airdrop:execute": "bash -c 'source .env 2>/dev/null; DRY_RUN=false forge script script/Airdrop.s.sol:Airdrop --rpc-url \"$RPC_URL\" --broadcast'"
   },
   "dependencies": {
     "@safe-global/api-kit": "^4.0.0",

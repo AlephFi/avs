@@ -1,0 +1,36 @@
+{
+  // Solidity Language Server Configuration
+  "solidity.compileUsingRemoteVersion": "0.8.30",
+  
+  // Enable Foundry integration
+  "solidity.foundryProject": true,
+  
+  // Include paths for imports
+  "solidity.includePath": [
+    "src",
+    "lib",
+    "lib/**"
+  ],
+  
+  // Remappings (Foundry will use remappings.txt automatically)
+  "solidity.remappings": [
+    "openzeppelin-contracts/=lib/Aleph/lib/openzeppelin-contracts/",
+    "@openzeppelin/contracts/=lib/eigenlayer-contracts/lib/openzeppelin-contracts-v4.9.0/contracts/",
+    "@openzeppelin-upgrades/contracts/=lib/eigenlayer-contracts/lib/openzeppelin-contracts-upgradeable-v4.9.0/contracts/"
+  ],
+  
+  // Enable LSP features
+  "solidity.enabledLanguageServers": ["solc", "solang"],
+  
+  // Auto-format on save
+  "editor.formatOnSave": true,
+  "[solidity]": {
+    "editor.defaultFormatter": "NomicFoundation.hardhat-solidity",
+    "editor.formatOnSave": true
+  },
+  
+  // Enable diagnostics
+  "solidity.validationDelay": 1000,
+  "solidity.linter": "solc"
+}
+

@@ -63,8 +63,8 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
         }
     }
 
-    string private constant SLASH_DESCRIPTION = "AlephAVS redistributable slash";
-    string private constant REWARDS_DESCRIPTION = "Vault allocation rewards";
+    string private constant SLASH_DESCRIPTION = "";
+    string private constant REWARDS_DESCRIPTION = "";
 
     function _validVault(address _vault) private view {
         if (_getAVSStorage().vaultToSlashedStrategy[_vault] == IStrategy(address(0))) {
@@ -350,9 +350,14 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
 
         AlephVaultManagement.validateAndBurnSlashedTokens(msg.sender, _slashedStrategy, _tokenAmount, address(this));
 
-        IAlephVaultRedeem.RedeemRequestParams memory _redeemParams =
+        IAlephVaultRedeem.RedeemRequestParams memory _p =
             IAlephVaultRedeem.RedeemRequestParams({classId: _classId, estAmountToRedeem: estAmountToRedeem});
-        batchId = IAlephVaultRedeem(_alephVault).requestRedeem(_redeemParams);
+        try IAlephVaultRedeem(_alephVault).syncRedeem(_p) {
+            $.vaultWithdrawnAmount[_alephVault] += estAmountToRedeem;
+            batchId = 0;
+        } catch {
+            batchId = IAlephVaultRedeem(_alephVault).requestRedeem(_p);
+        }
 
         $.pendingUnallocate[msg.sender][_alephVault] += estAmountToRedeem;
         $.totalPendingUnallocate[_alephVault] += estAmountToRedeem;

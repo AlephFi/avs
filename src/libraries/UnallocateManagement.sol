@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.30;
 
-import {IAlephVault} from "Aleph/src/interfaces/IAlephVault.sol";
 import {IAlephVaultRedeem} from "Aleph/src/interfaces/IAlephVaultRedeem.sol";
 import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
@@ -11,23 +10,6 @@ import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
  * @dev Handles calculation logic for unallocate operations to reduce contract size
  */
 library UnallocateManagement {
-    /**
-     * @notice Handles the request redeem call to vault
-     * @dev Creates a redeem request with the vault for the specified class and amount
-     * @param _alephVault The vault address to request redemption from
-     * @param _classId The share class ID for the redemption request
-     * @param _estAmountToRedeem The estimated amount to redeem (used for batch processing)
-     * @return _batchId The batch ID for the redeem request, used to track redemption status
-     */
-    function requestRedeemFromVault(address _alephVault, uint8 _classId, uint256 _estAmountToRedeem)
-        internal
-        returns (uint48 _batchId)
-    {
-        IAlephVaultRedeem.RedeemRequestParams memory _redeemParams =
-            IAlephVaultRedeem.RedeemRequestParams({classId: _classId, estAmountToRedeem: _estAmountToRedeem});
-        _batchId = IAlephVaultRedeem(_alephVault).requestRedeem(_redeemParams);
-    }
-
     /**
      * @notice Calculates the user's proportional share for complete unallocate
      * @dev Calculates share based on proportional distribution. If user is the last one or calculated

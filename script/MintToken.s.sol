@@ -38,27 +38,15 @@ contract MintToken is Script {
         console.log("Caller address:", caller);
 
         // Load configuration
-        address alephAVSAddress = getAlephAVSAddress();
         address tokenAddress = getTokenAddress();
         address mintToAddress = getMintToAddress(caller);
         uint256 mintAmount = getMintAmount();
 
-        console.log("AlephAVS address:", alephAVSAddress);
         console.log("Token address:", tokenAddress);
         console.log("Mint to address:", mintToAddress);
         console.log("Mint amount (wei):", mintAmount);
 
         // Get AlephAVS contract
-        AlephAVS alephAVS = AlephAVS(alephAVSAddress);
-
-        // Get ERC20Factory from AlephAVS
-        IERC20Factory erc20Factory = alephAVS.erc20Factory();
-        console.log("ERC20Factory address:", address(erc20Factory));
-
-        // Verify token was created by factory
-        if (!erc20Factory.isToken(tokenAddress)) {
-            revert("Token address is not a token created by the ERC20Factory");
-        }
 
         // Get token contract
         IMintableBurnableERC20 token = IMintableBurnableERC20(tokenAddress);

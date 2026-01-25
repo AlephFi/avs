@@ -25,3 +25,7 @@ deployments/*.json
 
 # Gas Snapshots
 .gas-snapshot
+.env.staging
+airdrop_prepared.csv
+eigen_yields_airdrop.csv
+eigen_yields_stakers_v2.csv

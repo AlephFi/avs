@@ -68,6 +68,9 @@ contract MinimalAlephVault is IAlephVaultDeposit, IAlephVaultRedeem {
     // Track isTotalAssetsValid per classId (defaults to true for sync deposits in tests)
     mapping(uint8 => bool) public isTotalAssetsValidForClass;
 
+    // Track notice period per classId (non-zero means async only)
+    mapping(uint8 => uint48) public noticePeriodForClass;
+
     constructor(address __underlyingToken) {
         _underlyingToken = IERC20(__underlyingToken);
     }
@@ -83,6 +86,18 @@ contract MinimalAlephVault is IAlephVaultDeposit, IAlephVaultRedeem {
     function isTotalAssetsValid(uint8 _classId) external view returns (bool) {
         // Default to true if not explicitly set, to maintain existing test behavior
         return isTotalAssetsValidForClass[_classId] != false;
+    }
+
+    function noticePeriod(uint8 _classId) external view returns (uint48) {
+        // Default to 1 (async only) to maintain existing test behavior
+        // noticePeriodForClass == type(uint48).max means explicitly set to 0
+        if (noticePeriodForClass[_classId] == type(uint48).max) return 0;
+        if (noticePeriodForClass[_classId] == 0) return 1; // Not set, default to async
+        return noticePeriodForClass[_classId];
+    }
+
+    function enableSyncRedeem(uint8 _classId) external {
+        noticePeriodForClass[_classId] = type(uint48).max; // Sentinel value for "explicitly set to 0"
     }
 
     function requestDeposit(RequestDepositParams calldata params) external override returns (uint48) {
@@ -109,8 +124,11 @@ contract MinimalAlephVault is IAlephVaultDeposit, IAlephVaultRedeem {
     }
 
     function syncRedeem(RedeemRequestParams calldata params) external override returns (uint256) {
-        // For simplicity in tests, return the estimated amount as assets
-        // In reality, this would calculate based on price per share
+        // Sync redeem only allowed if noticePeriod is 0 (explicitly enabled)
+        // noticePeriodForClass == type(uint48).max means explicitly set to 0
+        if (noticePeriodForClass[params.classId] != type(uint48).max) {
+            revert IAlephVaultRedeem.OnlyAsyncRedeemAllowed();
+        }
         uint256 amount = (params.estAmountToRedeem * pricePerShareValue) / 1e18;
         _underlyingToken.safeTransfer(msg.sender, amount);
         return amount;
@@ -331,7 +349,7 @@ contract AlephAVSTest is Test {
                         operatorSetId: _operatorSetId,
                         strategies: strategies,
                         wadsToSlash: expectedWads,
-                        description: "AlephAVS redistributable slash"
+                        description: ""
                     })
                 )
             ),
@@ -896,12 +914,13 @@ contract AlephAVSTest is Test {
         );
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(unallocateAmount, unallocateAmount, unallocateAmount);
-        vm.mockCall(
+        // Mock syncRedeem to revert (async only by default)
+        vm.mockCallRevert(
             address(alephVault),
             abi.encodeCall(
                 IAlephVaultRedeem.syncRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
             ),
-            abi.encode(expectedRedeemAmount)
+            abi.encodeWithSelector(IAlephVaultRedeem.OnlyAsyncRedeemAllowed.selector)
         );
 
         // Mock depositIntoStrategyWithSignature
