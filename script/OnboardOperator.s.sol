@@ -17,6 +17,9 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  * @notice Comprehensive script for onboarding an operator to AlephAVS
  * @dev This script performs all necessary steps to onboard an operator:
  *      1. Ensure allocation delay is set to 0 (required for allocations)
+ *         - IMPORTANT: If allocation delay is not yet initialized, the script will set it
+ *           and STOP. You must wait for ALLOCATION_CONFIGURATION_DELAY (~17.5 days / 126,000 blocks
+ *           on mainnet) before re-running the script to continue.
  *      2. Register as EigenLayer operator (if not already registered)
  *      3. Register for AlephAVS operator sets (if not already registered)
  *      4. Allocate stake to vault strategies (if strategies exist in operator sets)
@@ -27,6 +30,12 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *      The script skips steps that have already been completed.
  *      If the operator AVS split needs activation delay, the script stops
  *      and must be re-run after the delay period.
+ *
+ * @dev NEW OPERATOR ONBOARDING TIMELINE:
+ *      For operators who have never set an allocation delay before:
+ *      - First run: Sets allocation delay + sets AVS split, script stops
+ *      - Wait ~17.5 days (ALLOCATION_CONFIGURATION_DELAY)
+ *      - Second run: Completes Steps 2-4 (operator registration, operator set registration, allocation)
  *
  * @dev Allocation Behavior:
  *      - If operator has available (unallocated) magnitude: allocates directly to AlephAVS
@@ -53,6 +62,9 @@ import {AlephUtils} from "../src/libraries/AlephUtils.sol";
  *      - Or deregister from the other AVS first to allow immediate deallocation
  */
 contract OnboardOperator is Script {
+    // ALLOCATION_CONFIGURATION_DELAY is 126,000 blocks on mainnet (~17.5 days at 12s/block)
+    // This is a constant set in AllocationManager but not exposed via IAllocationManager interface
+    uint32 constant ALLOCATION_CONFIGURATION_DELAY = 126_000;
     function run() external {
         // Get operator private key
         uint256 operatorPrivateKey = getOperatorPrivateKey();
@@ -77,6 +89,8 @@ contract OnboardOperator is Script {
 
         // Track if we have queued deallocations (needed to stop script after Step 4)
         bool hasQueuedDeallocations = false;
+        // Track if allocation delay was just set (need to skip Step 4 but continue to Step 5)
+        bool allocationDelayJustSet = false;
 
         // Step 1: Ensure allocation delay is set to 0
         console.log("\n=== Step 1: Checking Allocation Delay ===");
@@ -87,13 +101,31 @@ contract OnboardOperator is Script {
         if (!isDelaySet || currentDelay != 0) {
             console.log("Setting allocation delay to 0...");
             allocationManager.setAllocationDelay(operator, 0);
-            console.log("[OK] Allocation delay set to 0 (will take effect after ALLOCATION_CONFIGURATION_DELAY)");
+
+            uint32 configDelay = ALLOCATION_CONFIGURATION_DELAY;
+            uint256 effectBlock = block.number + configDelay;
+            uint256 estimatedDays = (configDelay * 12) / 86400; // ~12 sec per block
+
+            console.log("[OK] Allocation delay set to 0");
+            console.log("\n=== IMPORTANT: Allocation Delay Configuration Delay ===");
+            console.log("ALLOCATION_CONFIGURATION_DELAY:", configDelay, "blocks");
+            console.log("Current block:", block.number);
+            console.log("Effect block:", effectBlock);
+            console.log("Estimated wait time:", estimatedDays, "days");
+            console.log("\n[INFO] Steps 2, 3, 4 will be skipped - requires waiting for configuration delay.");
+            console.log("After", configDelay, "blocks, re-run this script to complete onboarding.");
+
+            allocationDelayJustSet = true;
         } else {
             console.log("[OK] Allocation delay is already set to 0");
         }
 
         // Step 2: Register as EigenLayer operator (if not already registered)
-        if (!delegationManager.isOperator(operator)) {
+        // Note: This requires allocation delay to be configured (not just set)
+        if (allocationDelayJustSet) {
+            console.log("\n=== Step 2: Skipping EigenLayer Operator Registration ===");
+            console.log("[SKIP] Allocation delay must be configured before registering as operator.");
+        } else if (!delegationManager.isOperator(operator)) {
             console.log("\n=== Step 2: Registering as EigenLayer Operator ===");
             address delegationApprover = getDelegationApprover();
             string memory metadataURI = getMetadataURI();
@@ -108,11 +140,15 @@ contract OnboardOperator is Script {
         }
 
         // Step 3: Register for AlephAVS operator sets (if not already registered)
+        // Note: This requires being registered as an EigenLayer operator first
         OperatorSet memory lstOperatorSet = OperatorSet(alephAVSAddress, AlephUtils.LST_STRATEGIES_OPERATOR_SET_ID);
 
         bool isRegisteredForLST = allocationManager.isOperatorSlashable(operator, lstOperatorSet);
 
-        if (!isRegisteredForLST) {
+        if (allocationDelayJustSet) {
+            console.log("\n=== Step 3: Skipping AlephAVS Operator Set Registration ===");
+            console.log("[SKIP] Must complete Step 2 first.");
+        } else if (!isRegisteredForLST) {
             console.log("\n=== Step 3: Registering for AlephAVS Operator Sets ===");
 
             uint32[] memory operatorSetIds = new uint32[](1);
@@ -142,7 +178,10 @@ contract OnboardOperator is Script {
         IStrategy[] memory lstStrategies = allocationManager.getStrategiesInOperatorSet(lstOperatorSet);
         bool hasPendingAllocations = false;
 
-        if (lstStrategies.length == 0) {
+        if (allocationDelayJustSet) {
+            console.log("[SKIP] Allocation delay was just set. Skipping allocations until configuration delay passes.");
+            console.log("  Re-run this script after the delay to complete Step 4.");
+        } else if (lstStrategies.length == 0) {
             console.log("[WARNING] No strategies found in operator sets. Skipping stake allocation.");
             console.log("  Strategies will be added when vaults are initialized via initializeVault().");
         } else {
@@ -381,6 +420,26 @@ contract OnboardOperator is Script {
             console.log("You must wait for DEALLOCATION_DELAY (", deallocationDelay, "blocks) before continuing.");
             console.log("After the delay, re-run this script to complete allocation to AlephAVS.");
             console.log("The script will skip steps that are already completed.");
+            vm.stopBroadcast();
+            return;
+        }
+
+        // If allocation delay was just set, inform user to wait before other steps can be done
+        if (allocationDelayJustSet) {
+            uint32 configDelay = ALLOCATION_CONFIGURATION_DELAY;
+            uint256 estimatedDays = (configDelay * 12) / 86400;
+            console.log("\n=== Partial Onboarding Complete ===");
+            console.log("Operator:", operator);
+            console.log("AlephAVS:", alephAVSAddress);
+            console.log("\nCompleted steps:");
+            console.log("  [OK] Step 1: Allocation delay set to 0");
+            console.log("  [SKIP] Step 2: EigenLayer operator registration (requires configuration delay)");
+            console.log("  [SKIP] Step 3: AlephAVS operator set registration (requires Step 2)");
+            console.log("  [SKIP] Step 4: Stake allocation (requires Step 3)");
+            console.log("  [OK] Step 5: Operator AVS split set to 0");
+            console.log("\nNext steps:");
+            console.log("  1. Wait for ALLOCATION_CONFIGURATION_DELAY (~%s days / %s blocks)", estimatedDays, configDelay);
+            console.log("  2. Re-run this script to complete Steps 2, 3, and 4");
             vm.stopBroadcast();
             return;
         }
