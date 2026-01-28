@@ -654,6 +654,12 @@ contract AlephAVSTest is Test {
 
         // Initialize vault
         _initializeVaultForTests();
+
+        // Enable sync redeem for the vault (required since we removed async fallback)
+        alephVault.enableSyncRedeem(CLASS_ID);
+
+        // Fund the vault with tokens for sync redeem operations
+        underlyingToken.transfer(address(alephVault), STAKE_AMOUNT * 5);
     }
 
     function test_OperatorAllocatesToAlephVault() public {
@@ -914,14 +920,8 @@ contract AlephAVSTest is Test {
         );
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(unallocateAmount, unallocateAmount, unallocateAmount);
-        // Mock syncRedeem to revert (async only by default)
-        vm.mockCallRevert(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.syncRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encodeWithSelector(IAlephVaultRedeem.OnlyAsyncRedeemAllowed.selector)
-        );
+        // syncRedeem is enabled in setUp via enableSyncRedeem(CLASS_ID)
+        // The real MinimalAlephVault will handle the sync redeem
 
         // Mock depositIntoStrategyWithSignature
         vm.mockCall(
@@ -930,31 +930,12 @@ contract AlephAVSTest is Test {
             abi.encode(expectedRedeemAmount) // Return shares
         );
 
-        // Mock requestRedeem for async flow
+        // For sync flow: redeemableAmount returns 0 (funds already withdrawn by syncRedeem)
+        // The funds are in the contract and tracked via vaultWithdrawnAmount
         vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
+            address(alephVault), abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))), abi.encode(0)
         );
-
-        // Mock redeemableAmount and withdrawRedeemableAmount for completeUnallocate
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
+        // Don't need to mock withdrawRedeemableAmount since redeemableAmount is 0
 
         // Mock vault token approve
         vm.mockCall(address(underlyingToken), abi.encodeWithSelector(IERC20.approve.selector), abi.encode(true));
@@ -1286,6 +1267,9 @@ contract AlephAVSTest is Test {
         alephAVS.allocate(address(alephVault), params);
     }
 
+    /**
+     * @notice Test: Unallocate with different price per share (vault appreciation)
+     */
     function test_Unallocate_DifferentPricePerShare() public {
         address tokenHolder = makeAddr("tokenHolder");
         uint256 unallocateAmount = ALLOCATE_AMOUNT;
@@ -1313,28 +1297,9 @@ contract AlephAVSTest is Test {
         vm.mockCall(MOCK_SLASHED_TOKEN, abi.encodeWithSelector(IERC20.totalSupply.selector), abi.encode(1e18));
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(unallocateAmount, highPPS, 1e18);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
+
+        // Ensure vault has enough tokens for syncRedeem
+        underlyingToken.transfer(address(alephVault), expectedRedeemAmount);
 
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
@@ -1353,6 +1318,9 @@ contract AlephAVSTest is Test {
         assertEq(shares, expectedRedeemAmount, "Shares should match");
     }
 
+    /**
+     * @notice Test: Unallocate partial amount
+     */
     function test_Unallocate_PartialAmount() public {
         address tokenHolder = makeAddr("tokenHolder");
         uint256 totalAmount = ALLOCATE_AMOUNT;
@@ -1379,28 +1347,9 @@ contract AlephAVSTest is Test {
         );
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(partialAmount, totalAmount, totalAmount);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
+
+        // Ensure vault has enough tokens for syncRedeem
+        underlyingToken.transfer(address(alephVault), expectedRedeemAmount);
 
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
@@ -1419,6 +1368,9 @@ contract AlephAVSTest is Test {
         assertEq(shares, expectedRedeemAmount, "Shares should match");
     }
 
+    /**
+     * @notice Test: Multiple sequential unallocations by same user
+     */
     function test_Unallocate_MultipleUnallocations() public {
         address tokenHolder = makeAddr("tokenHolder");
         uint256 totalAmount = ALLOCATE_AMOUNT;
@@ -1448,29 +1400,10 @@ contract AlephAVSTest is Test {
         );
 
         uint256 firstExpectedRedeemAmount = ERC4626Math.previewRedeem(firstUnallocate, totalAmount, totalAmount);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem,
-                (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, firstExpectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(firstExpectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(firstExpectedRedeemAmount)
-        );
+
+        // Fund vault for first syncRedeem
+        underlyingToken.transfer(address(alephVault), firstExpectedRedeemAmount);
+
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
             abi.encodeWithSelector(IStrategyManager.depositIntoStrategyWithSignature.selector),
@@ -1496,37 +1429,16 @@ contract AlephAVSTest is Test {
             abi.encode()
         );
 
-        // Calculate expected redeem amount for second unallocation
         uint256 secondExpectedRedeemAmount = ERC4626Math.previewRedeem(secondUnallocate, totalAmount, totalAmount);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem,
-                (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, secondExpectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(secondExpectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(secondExpectedRedeemAmount)
-        );
+
+        // Fund vault for second syncRedeem
+        underlyingToken.transfer(address(alephVault), secondExpectedRedeemAmount);
+
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
             abi.encodeWithSelector(IStrategyManager.depositIntoStrategyWithSignature.selector),
             abi.encode(secondExpectedRedeemAmount)
         );
-        vm.mockCall(address(underlyingToken), abi.encodeWithSelector(IERC20.approve.selector), abi.encode(true));
 
         vm.prank(tokenHolder);
         alephAVS.requestUnallocate(address(alephVault), secondUnallocate);
@@ -1785,6 +1697,9 @@ contract AlephAVSTest is Test {
         // (This is tested implicitly - the nonReentrant modifier prevents re-entry)
     }
 
+    /**
+     * @notice Test: Reentrancy protection on unallocate
+     */
     function test_ReentrancyProtection_Unallocate() public {
         address tokenHolder = makeAddr("tokenHolder");
         uint256 unallocateAmount = ALLOCATE_AMOUNT;
@@ -1812,28 +1727,10 @@ contract AlephAVSTest is Test {
         );
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(unallocateAmount, unallocateAmount, unallocateAmount);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
+
+        // Fund vault for syncRedeem
+        underlyingToken.transfer(address(alephVault), expectedRedeemAmount);
+
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
             abi.encodeWithSelector(IStrategyManager.depositIntoStrategyWithSignature.selector),
@@ -1942,6 +1839,9 @@ contract AlephAVSTest is Test {
         alephAVS.allocate(address(alephVault), params);
     }
 
+    /**
+     * @notice Test: Unallocate emits correct event
+     */
     function test_Unallocate_EmitsCorrectEvent() public {
         address tokenHolder = makeAddr("tokenHolder");
         uint256 unallocateAmount = ALLOCATE_AMOUNT;
@@ -1969,28 +1869,10 @@ contract AlephAVSTest is Test {
         );
 
         uint256 expectedRedeemAmount = ERC4626Math.previewRedeem(unallocateAmount, unallocateAmount, unallocateAmount);
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(
-                IAlephVaultRedeem.requestRedeem, (IAlephVaultRedeem.RedeemRequestParams(CLASS_ID, expectedRedeemAmount))
-            ),
-            abi.encode(uint48(0))
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeCall(IAlephVault.redeemableAmount, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
-        vm.mockCall(
-            address(alephVault),
-            abi.encodeWithSelector(IAlephVaultRedeem.withdrawRedeemableAmount.selector),
-            abi.encode()
-        );
-        vm.mockCall(
-            address(underlyingToken),
-            abi.encodeCall(IERC20.balanceOf, (address(alephAVS))),
-            abi.encode(expectedRedeemAmount)
-        );
+
+        // Fund vault for syncRedeem
+        underlyingToken.transfer(address(alephVault), expectedRedeemAmount);
+
         vm.mockCall(
             MOCK_STRATEGY_MANAGER,
             abi.encodeWithSelector(IStrategyManager.depositIntoStrategyWithSignature.selector),
