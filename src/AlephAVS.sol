@@ -27,7 +27,6 @@ import {IMintableBurnableERC20} from "./interfaces/IMintableBurnableERC20.sol";
 import {AlephSlashing} from "./libraries/AlephSlashing.sol";
 import {AlephVaultManagement} from "./libraries/AlephVaultManagement.sol";
 import {RewardsManagement} from "./libraries/RewardsManagement.sol";
-import {UnallocateManagement} from "./libraries/UnallocateManagement.sol";
 import {AlephValidation} from "./libraries/AlephValidation.sol";
 
 contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
@@ -161,47 +160,42 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
      * @param _alephVault The Aleph vault address
      * @return userPendingAmount The user's pending unallocation amount
      * @return totalPendingAmount The total pending unallocation amount for the vault
-     * @return redeemableAmount The amount currently redeemable from the vault
-     * @return canComplete Whether the user can complete unallocation (has pending amount and vault has redeemable amount)
+     * @return vaultBalance The vault's underlying token balance (indicates if syncRedeem will work)
+     * @return canComplete Whether the user can complete (has pending and vault has sufficient balance)
      */
     function getPendingUnallocateStatus(address _user, address _alephVault)
         external
         view
-        returns (uint256 userPendingAmount, uint256 totalPendingAmount, uint256 redeemableAmount, bool canComplete)
+        returns (uint256 userPendingAmount, uint256 totalPendingAmount, uint256 vaultBalance, bool canComplete)
     {
         AVSStorage storage $ = _getAVSStorage();
         userPendingAmount = $.pendingUnallocate[_user][_alephVault];
         totalPendingAmount = $.totalPendingUnallocate[_alephVault];
 
-        // Get redeemable amount from vault
-        redeemableAmount = IAlephVault(_alephVault).redeemableAmount(address(this));
+        // Check vault's underlying token balance to see if syncRedeem will work
+        address _underlyingToken = IAlephVault(_alephVault).underlyingToken();
+        vaultBalance = IERC20(_underlyingToken).balanceOf(_alephVault);
 
-        // User can complete if they have pending amount and vault has redeemable amount
-        canComplete = userPendingAmount > 0 && redeemableAmount > 0;
+        // User can complete if they have pending amount and vault has enough balance
+        canComplete = userPendingAmount > 0 && vaultBalance >= userPendingAmount;
     }
 
     /**
      * @notice Calculates the expected amount that will be withdrawn in completeUnallocate
-     * @dev View function to get expected amount for signature generation. See interface documentation for details.
+     * @dev View function to get expected amount for signature generation.
+     *      With the new sync flow, user receives their full pending amount.
      *
      * @param _user The user address to calculate for
      * @param _alephVault The Aleph vault address
-     * @return expectedAmount The expected amount that will be withdrawn and deposited to strategy
+     * @return expectedAmount The expected amount (equals user's pending amount)
      */
     function calculateCompleteUnallocateAmount(address _user, address _alephVault)
         external
         view
         returns (uint256 expectedAmount)
     {
-        AVSStorage storage $ = _getAVSStorage();
-        uint256 _userPendingAmount = $.pendingUnallocate[_user][_alephVault];
-        uint256 _totalPending = $.totalPendingUnallocate[_alephVault];
-        uint256 _vaultRedeemableAmount = IAlephVault(_alephVault).redeemableAmount(address(this));
-        uint256 _withdrawnAmount = $.vaultWithdrawnAmount[_alephVault];
-
-        expectedAmount = UnallocateManagement.calculateCompleteUnallocateAmountView(
-            _userPendingAmount, _totalPending, _vaultRedeemableAmount, _withdrawnAmount
-        );
+        // User receives their full pending amount via syncRedeem
+        expectedAmount = _getAVSStorage().pendingUnallocate[_user][_alephVault];
     }
 
     function registerOperator(
@@ -263,6 +257,14 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
         );
     }
 
+    /// @notice Rescues tokens stuck in the contract
+    /// @param _token The token address to rescue
+    /// @param _to The recipient address
+    /// @param _amount The amount to rescue
+    function rescueTokens(address _token, address _to, uint256 _amount) external onlyRole(OWNER) {
+        IERC20(_token).transfer(_to, _amount);
+    }
+
     function allocate(address _alephVault, IAlephVaultDeposit.RequestDepositParams calldata _requestDepositParams)
         external
         nonReentrant
@@ -322,12 +324,13 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
     }
 
     /**
-     * @notice Requests to unallocate funds by redeeming slashed tokens from vault
-     * @dev First step of two-step unallocate flow. See interface documentation for detailed usage.
+     * @notice Requests to unallocate funds by burning slashed tokens
+     * @dev First step of two-step unallocate flow. Emits UnallocateRequested event for manager notification.
+     *      Manager should ensure vault has liquidity before user calls completeUnallocate.
      *
      * @param _alephVault The Aleph vault address to unallocate from
      * @param _tokenAmount The amount of slashed strategy tokens to unallocate
-     * @return batchId The batch ID for the redeem request
+     * @return batchId Always 0 (sync flow)
      * @return estAmountToRedeem The estimated amount that will be redeemed from the vault
      */
     function requestUnallocate(address _alephVault, uint256 _tokenAmount)
@@ -350,15 +353,8 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
 
         AlephVaultManagement.validateAndBurnSlashedTokens(msg.sender, _slashedStrategy, _tokenAmount, address(this));
 
-        IAlephVaultRedeem.RedeemRequestParams memory _p =
-            IAlephVaultRedeem.RedeemRequestParams({classId: _classId, estAmountToRedeem: estAmountToRedeem});
-        try IAlephVaultRedeem(_alephVault).syncRedeem(_p) {
-            $.vaultWithdrawnAmount[_alephVault] += estAmountToRedeem;
-            batchId = 0;
-        } catch {
-            batchId = IAlephVaultRedeem(_alephVault).requestRedeem(_p);
-        }
-
+        // Record pending amount - syncRedeem will be called in completeUnallocate
+        batchId = 0;
         $.pendingUnallocate[msg.sender][_alephVault] += estAmountToRedeem;
         $.totalPendingUnallocate[_alephVault] += estAmountToRedeem;
 
@@ -370,8 +366,8 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
     }
 
     /**
-     * @notice Completes the unallocation by withdrawing redeemable amount and depositing back to strategy
-     * @dev Second step of two-step unallocate flow. See interface documentation for detailed usage.
+     * @notice Completes the unallocation by calling syncRedeem and depositing back to strategy
+     * @dev Second step of two-step unallocate flow. Manager must ensure vault has liquidity first.
      *
      * @param _alephVault The Aleph vault address to complete unallocation from
      * @param _strategyDepositExpiry The expiry timestamp for the strategy deposit signature
@@ -398,44 +394,19 @@ contract AlephAVS is IAlephAVS, AlephAVSPausable, ReentrancyGuard {
         uint256 _userPendingAmount = $.pendingUnallocate[msg.sender][_alephVault];
         if (_userPendingAmount == 0) revert NoPendingUnallocation();
 
-        // Calculate expected amount first (before withdrawing) so signature can be generated
-        // Use the stored estAmountToRedeem as the expected amount
-        uint256 _totalPending = $.totalPendingUnallocate[_alephVault];
-        if (_totalPending == 0 || _totalPending < _userPendingAmount) revert InvalidAmount();
+        // Call syncRedeem to get funds from vault
+        IAlephVaultRedeem.RedeemRequestParams memory _p =
+            IAlephVaultRedeem.RedeemRequestParams({classId: _classId, estAmountToRedeem: _userPendingAmount});
+        IAlephVaultRedeem(_alephVault).syncRedeem(_p);
 
-        uint256 _vaultRedeemableAmount = IAlephVault(_alephVault).redeemableAmount(address(this));
-        uint256 _withdrawnAmount = $.vaultWithdrawnAmount[_alephVault];
+        // User receives their full pending amount
+        _amount = _userPendingAmount;
 
-        // Calculate expected amount using view function (before state changes)
-        uint256 _expectedAmount = UnallocateManagement.calculateCompleteUnallocateAmountView(
-            _userPendingAmount, _totalPending, _vaultRedeemableAmount, _withdrawnAmount
-        );
-
-        if (_expectedAmount == 0) revert InvalidAmount();
-
-        // Step 1: Withdraw redeemable amount from vault and calculate total available
-        uint256 _totalRedeemableAmount = UnallocateManagement.withdrawAndCalculateAvailable(
-            _alephVault, _vaultToken, _vaultRedeemableAmount, _withdrawnAmount
-        );
-
-        // Step 2: Validate expected amount but don't cap it
-        _amount = _expectedAmount;
-        if (_amount == 0) revert InvalidAmount();
-        if (_amount > _totalRedeemableAmount) revert InvalidAmount();
-        uint256 _contractBalance = _vaultToken.balanceOf(address(this));
-        if (_amount > _contractBalance) revert InvalidAmount();
-
-        // Step 3: Update storage
-        // Calculate new values using _totalRedeemableAmount directly (total available after withdrawal)
-        (uint256 _newVaultWithdrawnAmount, uint256 _newTotalPending) = UnallocateManagement.calculateUnallocationStorageUpdates(
-            _totalRedeemableAmount, _amount, _userPendingAmount, _totalPending
-        );
-
-        $.vaultWithdrawnAmount[_alephVault] = _newVaultWithdrawnAmount;
+        // Update storage
         $.pendingUnallocate[msg.sender][_alephVault] = 0;
-        $.totalPendingUnallocate[_alephVault] = _newTotalPending;
+        $.totalPendingUnallocate[_alephVault] -= _userPendingAmount;
 
-        // Step 4: Deposit to strategy (interaction)
+        // Deposit to strategy
         _shares = AlephVaultManagement.depositToOriginalStrategy(
             STRATEGY_MANAGER,
             _originalStrategy,
