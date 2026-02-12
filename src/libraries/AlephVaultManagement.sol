@@ -148,11 +148,14 @@ library AlephVaultManagement {
         uint256 _tokenAmount
     ) internal returns (uint256 shares) {
         IERC20 _vaultToken = IERC20(IAlephVault(_vault).underlyingToken());
-        SafeERC20.forceApprove(_vaultToken, _vault, _tokenAmount);
+        // Use actual balance to handle rebasing tokens (e.g. stETH) where
+        // transfers can lose 1-2 wei due to share rounding.
+        uint256 _depositAmount = _vaultToken.balanceOf(address(this));
+        SafeERC20.forceApprove(_vaultToken, _vault, _depositAmount);
 
         IAlephVaultDeposit.RequestDepositParams memory adjustedParams = IAlephVaultDeposit.RequestDepositParams({
             classId: _requestDepositParams.classId,
-            amount: _tokenAmount,
+            amount: _depositAmount,
             authSignature: _requestDepositParams.authSignature
         });
 
